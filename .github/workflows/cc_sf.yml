@@ -1,0 +1,54 @@
+name: cc-sf
+
+on:
+  workflow_dispatch:
+    inputs:
+      depth:
+        description: 'Stockfish depth'
+        default: '18'
+      shards:
+        description: 'number of parallel shards (must equal the matrix size)'
+        default: '8'
+
+jobs:
+  settings:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: fetch stockfish 18 (x86-64)
+        run: |
+          curl -fL -o sf.tar https://github.com/official-stockfish/Stockfish/releases/download/sf_18/stockfish-ubuntu-x86-64-avx2.tar \
+            || curl -fL -o sf.tar https://github.com/official-stockfish/Stockfish/releases/download/sf_18/stockfish-ubuntu-x86-64.tar
+          tar xf sf.tar
+          SF=$(find stockfish -type f -name 'stockfish*' | head -1)
+          chmod +x "$SF"
+          echo "SF=$SF" >> $GITHUB_ENV
+          printf 'uci\nquit\n' | "$SF" | head -2 || true
+  analyze:
+    needs: settings
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+    steps:
+      - uses: actions/checkout@v4
+      - name: fetch stockfish 18 (x86-64)
+        run: |
+          curl -fL -o sf.tar https://github.com/official-stockfish/Stockfish/releases/download/sf_18/stockfish-ubuntu-x86-64-avx2.tar \
+            || curl -fL -o sf.tar https://github.com/official-stockfish/Stockfish/releases/download/sf_18/stockfish-ubuntu-x86-64.tar
+          tar xf sf.tar
+          SF=$(find stockfish -type f -name 'stockfish*' | head -1)
+          chmod +x "$SF"
+          echo "SF=$SF" >> $GITHUB_ENV
+      - name: analyze shard ${{ matrix.shard }}
+        run: |
+          python3 cc_sf_worker.py --plan cc_plan.json --out out_${{ matrix.shard }}.jsonl \
+            --sf "$SF" --depth ${{ github.event.inputs.depth }} --workers 2 \
+            --shard ${{ matrix.shard }} --shards ${{ github.event.inputs.shards }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: out-${{ matrix.shard }}
+          path: out_${{ matrix.shard }}.jsonl
+          if-no-files-found: warn
+          retention-days: 7
